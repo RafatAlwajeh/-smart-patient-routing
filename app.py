@@ -2,12 +2,11 @@ import streamlit as st
 import pandas as pd
 import qrcode
 from io import BytesIO
-import base64
 
 # 1. تهيئة الصفحة
 st.set_page_config(page_title="نظام التوجيه الذكي وتدفق المرضى", layout="wide", page_icon="🚑")
 
-# دعم RTL والحماية من التعليق
+# دعم RTL وتنسيق البطاقة لتعمل مع الوضع الداكن والديناميكي
 st.markdown('''
     <style>
         body, div, h1, h2, h3, h4, p, span, label {
@@ -27,13 +26,29 @@ st.markdown('''
             padding: 10px;
             border-radius: 5px;
             margin-bottom: 10px;
+            color: #900C3F !important;
         }
+        /* تنسيق البطاقة الرقمية لتتوافق مع Dark & Light Mode */
         .patient-card {
             border: 2px solid #1E88E5;
-            border-radius: 10px;
-            padding: 20px;
-            background-color: #f9f9f9;
+            border-radius: 12px;
+            padding: 25px;
+            background-color: #1e2640;
+            color: #ffffff !important;
             text-align: center;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            margin-bottom: 20px;
+        }
+        .patient-card h3 {
+            color: #64B5F6 !important;
+            margin-bottom: 15px;
+            text-align: center !important;
+        }
+        .patient-card p {
+            color: #e0e0e0 !important;
+            font-size: 1.1rem;
+            text-align: center !important;
+            margin: 8px 0;
         }
     </style>
 ''', unsafe_allow_html=True)
@@ -57,10 +72,9 @@ if "patients_history" not in st.session_state:
 if "authenticated_doctor" not in st.session_state:
     st.session_state.authenticated_doctor = False
 
-# قراءة معاملات الرابط (Query Params) لعرض تذكرة المريض عند مسح QR
+# قراءة معاملات الرابط عند مسح QR Code من الجوال
 query_params = st.query_params
 
-# إذا تم مسح QR Code وفتح الرابط من الجوال
 if "ticket_patient" in query_params:
     p_name = query_params["ticket_patient"]
     p_clinic = query_params.get("clinic", "غير محدد")
@@ -69,19 +83,18 @@ if "ticket_patient" in query_params:
 
     st.markdown("<h2 style='text-align: center;'>🎫 بطاقة تذكرة المريض الرقمية</h2>", unsafe_allow_html=True)
     
-    # عرض بطاقة المريض
+    # عرض بطاقة المريض مع نصوص واضحة وخلفية متناسقة
     st.markdown(f'''
         <div class="patient-card">
-            <h3>اسم المريض: {p_name}</h3>
-            <p><strong>العيادة الموجه إليها:</strong> {p_clinic}</p>
-            <p><strong>مستوى الفرز الطبي:</strong> {p_triage}</p>
-            <p><strong>زمن الانتظار المتوقع:</strong> {p_wait} دقيقة</p>
+            <h3>👤 اسم المريض: {p_name}</h3>
+            <p><strong>🏥 العيادة الموجه إليها:</strong> {p_clinic}</p>
+            <p><strong>🚨 مستوى الفرز الطبي:</strong> {p_triage}</p>
+            <p><strong>⏱️ زمن الانتظار المتوقع:</strong> {p_wait} دقيقة</p>
         </div>
     ''', unsafe_allow_html=True)
     
-    st.write("")
     st.info("💡 احتفظ بهذه الصفحة لتتبع دورك في صالة الانتظار.")
-    st.stop() # إيقاف بقية الواجهة لعرض البطاقة فقط على جوال المريض
+    st.stop()
 
 # 3. الهيدر والتنقل
 st.title("🚑 نظام التوجيه الذكي وتدفق المرضى (Smart Patient Routing)")
@@ -149,27 +162,26 @@ if mode == "الرئيسية":
                 "id": patient_name, "triage": triage_level, "clinic": clinic_name, "wait": wait_time
             })
             
-            # رابط التذكرة الذي يفتحه الـ QR عند المسح من الجوال
-            # يمكنك استبدال localhost برابط Streamlit المباشر الخاص بك
+            # رابط التذكرة الذي يفتحه الـ QR
             base_url = "https://smart-patient-routing.streamlit.app/"
             ticket_url = f"{base_url}?ticket_patient={patient_name}&clinic={clinic_name}&triage={triage_level}&wait={wait_time}"
             
-            # إنشاء الـ QR Code يحتوي على رابط الصفحـة
+            # إنتاج الـ QR Code
             qr = qrcode.make(ticket_url)
             buffer = BytesIO()
             qr.save(buffer, format="PNG")
             img_bytes = buffer.getvalue()
             
-            c_qr, c_down = st.columns([1, 2])
-            with c_qr:
-                st.image(img_bytes, caption="امسح الرمز لتصفيح التذكرة 📱", width=160)
-            with c_down:
-                st.write("### 🎫 خيارات التذكرة:")
+            # عرض رمز QR وتحته زر التنزيل مباشرة في العمود نفسه
+            col_qr, col_info = st.columns([1, 2])
+            with col_qr:
+                st.image(img_bytes, caption="امسح الرمز للتذكرة الرقمية 📱", width=180)
                 st.download_button(
-                    label="📥 تنزيل بطاقة التذكرة (QR Code)",
+                    label="📥 تنزيل رمز QR",
                     data=img_bytes,
                     file_name=f"ticket_{patient_name}.png",
-                    mime="image/png"
+                    mime="image/png",
+                    use_container_width=True
                 )
         else:
             st.error("⚠️ جميع عيادات هذا التخصص متوقفة حالياً! يرجى تحويل الحالة لقسم الطوارئ المركزي.")
