@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import qrcode
 from io import BytesIO
+import base64
 
 # 1. تهيئة الصفحة
 st.set_page_config(page_title="نظام التوجيه الذكي وتدفق المرضى", layout="wide", page_icon="🚑")
@@ -27,6 +28,13 @@ st.markdown('''
             border-radius: 5px;
             margin-bottom: 10px;
         }
+        .patient-card {
+            border: 2px solid #1E88E5;
+            border-radius: 10px;
+            padding: 20px;
+            background-color: #f9f9f9;
+            text-align: center;
+        }
     </style>
 ''', unsafe_allow_html=True)
 
@@ -48,6 +56,32 @@ if "patients_history" not in st.session_state:
 
 if "authenticated_doctor" not in st.session_state:
     st.session_state.authenticated_doctor = False
+
+# قراءة معاملات الرابط (Query Params) لعرض تذكرة المريض عند مسح QR
+query_params = st.query_params
+
+# إذا تم مسح QR Code وفتح الرابط من الجوال
+if "ticket_patient" in query_params:
+    p_name = query_params["ticket_patient"]
+    p_clinic = query_params.get("clinic", "غير محدد")
+    p_triage = query_params.get("triage", "عادي")
+    p_wait = query_params.get("wait", "0")
+
+    st.markdown("<h2 style='text-align: center;'>🎫 بطاقة تذكرة المريض الرقمية</h2>", unsafe_allow_html=True)
+    
+    # عرض بطاقة المريض
+    st.markdown(f'''
+        <div class="patient-card">
+            <h3>اسم المريض: {p_name}</h3>
+            <p><strong>العيادة الموجه إليها:</strong> {p_clinic}</p>
+            <p><strong>مستوى الفرز الطبي:</strong> {p_triage}</p>
+            <p><strong>زمن الانتظار المتوقع:</strong> {p_wait} دقيقة</p>
+        </div>
+    ''', unsafe_allow_html=True)
+    
+    st.write("")
+    st.info("💡 احتفظ بهذه الصفحة لتتبع دورك في صالة الانتظار.")
+    st.stop() # إيقاف بقية الواجهة لعرض البطاقة فقط على جوال المريض
 
 # 3. الهيدر والتنقل
 st.title("🚑 نظام التوجيه الذكي وتدفق المرضى (Smart Patient Routing)")
@@ -103,21 +137,40 @@ if mode == "الرئيسية":
     if st.button("🚀 توجيه واستخراج تذكرة المريض", type="primary", use_container_width=True):
         best_ip, wait_time = get_best_clinic(spec, triage_level)
         if best_ip:
+            clinic_name = st.session_state.clinics[best_ip]['name']
             st.session_state.clinics[best_ip]["queue"] += 1
             if "🔴" in triage_level:
                 st.session_state.clinics[best_ip]["critical_count"] += 1
-                st.error(f"🚨 **توجيه طوارئ عاجل:** تم تحويل الحالة الحرجة إلى **{st.session_state.clinics[best_ip]['name']}** وتنبيه الطبيب فوراً!")
+                st.error(f"🚨 **توجيه طوارئ عاجل:** تم تحويل الحالة الحرجة إلى **{clinic_name}** وتنبيه الطبيب فوراً!")
             else:
-                st.success(f"💡 **التوصية الذكية:** تحويل المريض إلى **{st.session_state.clinics[best_ip]['name']}** | ⏱️ الانتظار المتوقع: **{wait_time} دقيقة**")
+                st.success(f"💡 **التوصية الذكية:** تحويل المريض إلى **{clinic_name}** | ⏱️ الانتظار المتوقع: **{wait_time} دقيقة**")
             
             st.session_state.patients_history.append({
-                "id": patient_name, "triage": triage_level, "clinic": st.session_state.clinics[best_ip]['name'], "wait": wait_time
+                "id": patient_name, "triage": triage_level, "clinic": clinic_name, "wait": wait_time
             })
             
-            qr = qrcode.make(f"Patient: {patient_name} | Clinic: {st.session_state.clinics[best_ip]['name']} | Status: {triage_level}")
+            # رابط التذكرة الذي يفتحه الـ QR عند المسح من الجوال
+            # يمكنك استبدال localhost برابط Streamlit المباشر الخاص بك
+            base_url = "https://smart-patient-routing.streamlit.app/"
+            ticket_url = f"{base_url}?ticket_patient={patient_name}&clinic={clinic_name}&triage={triage_level}&wait={wait_time}"
+            
+            # إنشاء الـ QR Code يحتوي على رابط الصفحـة
+            qr = qrcode.make(ticket_url)
             buffer = BytesIO()
             qr.save(buffer, format="PNG")
-            st.image(buffer.getvalue(), caption="امسح الرمز لتتبع التذكرة من الجوال 📱", width=150)
+            img_bytes = buffer.getvalue()
+            
+            c_qr, c_down = st.columns([1, 2])
+            with c_qr:
+                st.image(img_bytes, caption="امسح الرمز لتصفيح التذكرة 📱", width=160)
+            with c_down:
+                st.write("### 🎫 خيارات التذكرة:")
+                st.download_button(
+                    label="📥 تنزيل بطاقة التذكرة (QR Code)",
+                    data=img_bytes,
+                    file_name=f"ticket_{patient_name}.png",
+                    mime="image/png"
+                )
         else:
             st.error("⚠️ جميع عيادات هذا التخصص متوقفة حالياً! يرجى تحويل الحالة لقسم الطوارئ المركزي.")
 
@@ -134,7 +187,7 @@ if mode == "الرئيسية":
     ])
     st.dataframe(df, use_container_width=True)
 
-# 5. الشاشة الثانية: مكتب الطبيب (مع نظام الحماية Authentication)
+# 5. الشاشة الثانية: مكتب الطبيب
 elif mode == "الطبيب":
     if not st.session_state.authenticated_doctor:
         st.subheader("🔒 دخول الكادر الطبي")
@@ -204,11 +257,10 @@ elif mode == "الباب":
     m1.metric(label="عدد الحالات المنتظرة", value=f"{clinic['queue']} مرضى")
     m2.metric(label="زمن الانتظار المتوقع", value=f"{clinic['queue'] * clinic['avg_time']} دقيقة")
 
-# 7. الشاشة الرابعة: التحليلات والتنبؤ الذكي (ML Predictive Insights)
+# 7. الشاشة الرابعة: التحليلات والتنبؤ الذكي
 elif mode == "التحليلات":
     st.subheader("📊 لوحة التحليلات والتنبؤ الذكي باقتظاط العيادات")
     
-    # التنبؤ الذكي بالازدحام
     total_waiting = sum(d["queue"] for d in st.session_state.clinics.values())
     if total_waiting > 10:
         st.warning(f"⚠️ **تنبؤ الذكاء الاصطناعي:** يُتوقع ذروة ازدحام خلال 45 دقيقة القادمة ({total_waiting} حالة منتظرة). يُوصى بفتح عيادات إضافية.")
