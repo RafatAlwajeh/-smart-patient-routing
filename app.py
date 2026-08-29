@@ -1,13 +1,51 @@
 import streamlit as st
 import pandas as pd
 import qrcode
+import json
+import os
 from io import BytesIO
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
 # 1. تهيئة الصفحة
 st.set_page_config(page_title="نظام التوجيه الذكي وتدفق المرضى", layout="wide", page_icon="🚑")
 
-# دعم RTL وتنسيق البطاقة للوضع الداكن والديناميكي
+# 2. ملف الحفظ الموحد للمزامنة بين الأجهزة والجوال
+DATA_FILE = "clinics_data.json"
+
+DEFAULT_CLINICS = {
+    "192.168.1.101": {"name": "عيادة العظام 1", "specialty": "عظام", "status": "🟢 أخضر", "queue": 2, "avg_time": 10, "critical_count": 0},
+    "192.168.1.102": {"name": "عيادة العظام 2", "specialty": "عظام", "status": "🟡 أصفر", "queue": 5, "avg_time": 10, "critical_count": 1},
+    "192.168.1.103": {"name": "عيادة الباطنية 1", "specialty": "باطنية", "status": "🟢 أخضر", "queue": 1, "avg_time": 8, "critical_count": 0},
+    "192.168.1.104": {"name": "عيادة الباطنية 2", "specialty": "باطنية", "status": "🔴 أحمر", "queue": 8, "avg_time": 8, "critical_count": 2},
+}
+
+def load_clinics():
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return DEFAULT_CLINICS
+    return DEFAULT_CLINICS
+
+def save_clinics(data):
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+
+# تحميل أحدث البيانات دائماً
+st.session_state.clinics = load_clinics()
+
+if "patients_history" not in st.session_state:
+    st.session_state.patients_history = [
+        {"id": "P-101", "triage": "🟢 عادي", "clinic": "عيادة العظام 1", "wait": 10},
+        {"id": "P-102", "triage": "🔴 حرج جداً", "clinic": "عيادة الباطنية 1", "wait": 0},
+        {"id": "P-103", "triage": "🟡 متوسط", "clinic": "عيادة العظام 2", "wait": 20},
+    ]
+
+if "authenticated_doctor" not in st.session_state:
+    st.session_state.authenticated_doctor = False
+
+# دعم RTL وتنسيق البطاقات
 st.markdown('''
     <style>
         body, div, h1, h2, h3, h4, p, span, label {
@@ -53,34 +91,13 @@ st.markdown('''
     </style>
 ''', unsafe_allow_html=True)
 
-# 2. البيانات اللحظية في session_state
-if "clinics" not in st.session_state:
-    st.session_state.clinics = {
-        "192.168.1.101": {"name": "عيادة العظام 1", "specialty": "عظام", "status": "🟢 أخضر", "queue": 2, "avg_time": 10, "critical_count": 0},
-        "192.168.1.102": {"name": "عيادة العظام 2", "specialty": "عظام", "status": "🟡 أصفر", "queue": 5, "avg_time": 10, "critical_count": 1},
-        "192.168.1.103": {"name": "عيادة الباطنية 1", "specialty": "باطنية", "status": "🟢 أخضر", "queue": 1, "avg_time": 8, "critical_count": 0},
-        "192.168.1.104": {"name": "عيادة الباطنية 2", "specialty": "باطنية", "status": "🔴 أحمر", "queue": 8, "avg_time": 8, "critical_count": 2},
-    }
-
-if "patients_history" not in st.session_state:
-    st.session_state.patients_history = [
-        {"id": "P-101", "triage": "🟢 عادي", "clinic": "عيادة العظام 1", "wait": 10},
-        {"id": "P-102", "triage": "🔴 حرج جداً", "clinic": "عيادة الباطنية 1", "wait": 0},
-        {"id": "P-103", "triage": "🟡 متوسط", "clinic": "عيادة العظام 2", "wait": 20},
-    ]
-
-if "authenticated_doctor" not in st.session_state:
-    st.session_state.authenticated_doctor = False
-
 # دالة توليد صورة بطاقة المريض للتحميل
 def generate_ticket_image(name, clinic, triage, wait):
     img = Image.new('RGB', (600, 350), color='#1e2640')
     d = ImageDraw.Draw(img)
     
-    # إطار خارجي
     d.rectangle([10, 10, 590, 340], outline='#1E88E5', width=3)
     
-    # كتابة النصوص داخل الصورة
     d.text((300, 40), "بطاقة تذكرة المريض الرقمية", fill='#64B5F6', anchor="mm")
     d.text((300, 110), f"اسم المريض: {name}", fill='#ffffff', anchor="mm")
     d.text((300, 170), f"العيادة الموجه إليها: {clinic}", fill='#ffffff', anchor="mm")
@@ -91,7 +108,7 @@ def generate_ticket_image(name, clinic, triage, wait):
     img.save(buf, format='PNG')
     return buf.getvalue()
 
-# قراءة معاملات الرابط عند مسح QR Code من الجوال
+# 3. قراءة معاملات الرابط عند مسح QR Code من الجوال
 query_params = st.query_params
 
 if "ticket_patient" in query_params:
@@ -99,16 +116,17 @@ if "ticket_patient" in query_params:
     p_clinic_name = query_params.get("clinic", "غير محدد")
     p_triage = query_params.get("triage", "عادي")
     
-    # حساب الانتظار اللحظي المتبقي
+    # قراءة أحدث بيانات مباشرة من الملف المشترك
+    latest_clinics = load_clinics()
+    
     current_wait = 0
-    for ip, d in st.session_state.clinics.items():
+    for ip, d in latest_clinics.items():
         if d["name"] == p_clinic_name:
             current_wait = d["queue"] * d["avg_time"]
             break
 
     st.markdown("<h2 style='text-align: center;'>🎫 بطاقة تذكرة المريض الرقمية</h2>", unsafe_allow_html=True)
     
-    # عرض بطاقة المريض
     st.markdown(f'''
         <div class="patient-card">
             <h3>👤 اسم المريض: {p_name}</h3>
@@ -118,7 +136,6 @@ if "ticket_patient" in query_params:
         </div>
     ''', unsafe_allow_html=True)
     
-    # زر تنزيل صورة البطاقة من صفحة المريض
     card_img_bytes = generate_ticket_image(p_name, p_clinic_name, p_triage, current_wait)
     
     c_down, _ = st.columns([1, 1])
@@ -134,7 +151,7 @@ if "ticket_patient" in query_params:
     st.info("💡 قم بتحديث الصفحة لتتبع انخفاض زمن انتظارك عند دخول الحالات.")
     st.stop()
 
-# 3. الهيدر والتنقل
+# 4. الهيدر والتنقل الرئيسي
 st.title("🚑 نظام التوجيه الذكي وتدفق المرضى (Smart Patient Routing)")
 st.caption("نظام الفرز الطبي التلقائي، التنبؤ بالازدحام، والمزامنة اللحظية")
 st.write("---")
@@ -162,7 +179,7 @@ if nav4.button("📊 التحليلات والتنبؤ", use_container_width=Tru
 st.write("---")
 mode = st.session_state.current_page
 
-# 4. الشاشة الأولى: الفرز والاستقبال
+# 5. الشاشة الأولى: الفرز والاستقبال
 if mode == "الرئيسية":
     st.subheader("📋 تسجيل مريض جديد وفرز الحالات (Triage & Routing)")
     
@@ -196,15 +213,16 @@ if mode == "الرئيسية":
             else:
                 st.success(f"💡 **التوصية الذكية:** تحويل المريض إلى **{clinic_name}** | ⏱️ الانتظار المتوقع: **{wait_time} دقيقة**")
             
+            # حفظ التحديث الموحد
+            save_clinics(st.session_state.clinics)
+            
             st.session_state.patients_history.append({
                 "id": patient_name, "triage": triage_level, "clinic": clinic_name, "wait": wait_time
             })
             
-            # رابط التذكرة الذي يفتحه الـ QR
-            base_url = "https://smart-patient-routing.streamlit.app/"
+            base_url = "https://patient-routing.streamlit.app/"
             ticket_url = f"{base_url}?ticket_patient={patient_name}&clinic={clinic_name}&triage={triage_level}"
             
-            # إنتاج الـ QR Code
             qr = qrcode.make(ticket_url)
             buffer = BytesIO()
             qr.save(buffer, format="PNG")
@@ -221,7 +239,7 @@ if mode == "الرئيسية":
                     use_container_width=True
                 )
         else:
-            st.error("⚠️ جميع عيادات هذا التخصص متوقفة حالياً! يرجى تحويل الحالة لقسم الطوارئ المركزي.")
+            st.error("⚠️ جميع عيادات هذا التخصص متوقفة حالياً!")
 
     st.write("### 🏥 حالة العيادات والضغط اللحظي:")
     df = pd.DataFrame([
@@ -236,19 +254,19 @@ if mode == "الرئيسية":
     ])
     st.dataframe(df, use_container_width=True)
 
-# 5. الشاشة الثانية: مكتب الطبيب
+# 6. الشاشة الثانية: مكتب الطبيب
 elif mode == "الطبيب":
     if not st.session_state.authenticated_doctor:
         st.subheader("🔒 دخول الكادر الطبي")
-        pwd = st.text_input("أدخل كلمة مرور الطبيب للوصول للوحة التحكم:", type="password")
+        pwd = st.text_input("أدخل كلمة مرور الطبيب:", type="password")
         if st.button("تسجيل الدخول"):
-            if pwd == "1234" or pwd == "admin":
+            if pwd in ["1234", "admin"]:
                 st.session_state.authenticated_doctor = True
                 st.rerun()
             else:
                 st.error("كلمة المرور غير صحيحة!")
     else:
-        if st.button("🚪 تسجيل الخروج من لوحة الطبيب"):
+        if st.button("🚪 تسجيل الخروج"):
             st.session_state.authenticated_doctor = False
             st.rerun()
             
@@ -260,19 +278,22 @@ elif mode == "الطبيب":
         if clinic["critical_count"] > 0:
             st.markdown(f'''
                 <div class="critical-box">
-                    <h4>🚨 تنبيه طوارئ: يوجد {clinic['critical_count']} حالة حرجة بالانتظار تتطلب التدخل الفوري!</h4>
+                    <h4>🚨 تنبيه طوارئ: يوجد {clinic['critical_count']} حالة حرجة بالانتظار!</h4>
                 </div>
             ''', unsafe_allow_html=True)
         
         col1, col2, col3 = st.columns(3)
-        if col1.button("🟢 متاح (جاهز لاستقبال)", use_container_width=True):
+        if col1.button("🟢 متاح", use_container_width=True):
             st.session_state.clinics[selected_ip]["status"] = "🟢 أخضر"
+            save_clinics(st.session_state.clinics)
             st.rerun()
         if col2.button("🟡 ضغط مرتفع", use_container_width=True):
             st.session_state.clinics[selected_ip]["status"] = "🟡 أصفر"
+            save_clinics(st.session_state.clinics)
             st.rerun()
-        if col3.button("🔴 توقف مؤقت / طوارئ", use_container_width=True):
+        if col3.button("🔴 توقف مؤقت", use_container_width=True):
             st.session_state.clinics[selected_ip]["status"] = "🔴 أحمر"
+            save_clinics(st.session_state.clinics)
             st.rerun()
             
         st.write("---")
@@ -280,15 +301,21 @@ elif mode == "الطبيب":
         c1, c2 = st.columns(2)
         if c1.button("➕ دخول مريض جديد", use_container_width=True):
             st.session_state.clinics[selected_ip]["queue"] += 1
+            save_clinics(st.session_state.clinics)
             st.rerun()
         if c2.button("✅ إنهاء المعاينة ودخول التالي", use_container_width=True) and clinic["queue"] > 0:
             st.session_state.clinics[selected_ip]["queue"] -= 1
             if clinic["critical_count"] > 0:
                 st.session_state.clinics[selected_ip]["critical_count"] -= 1
+            # حفظ النقصان فوراً ليتحدث الجوال
+            save_clinics(st.session_state.clinics)
             st.rerun()
 
-# 6. الشاشة الثالثة: شاشة الانتظار
+# 7. الشاشة الثالثة: شاشة الانتظار (شاشة الباب)
 elif mode == "الباب":
+    # إعادة تحميل البيانات لضمان المزامنة
+    st.session_state.clinics = load_clinics()
+    
     selected_ip = st.selectbox("اختر العيادة للمعاينة:", list(st.session_state.clinics.keys()))
     clinic = st.session_state.clinics[selected_ip]
     
@@ -300,21 +327,22 @@ elif mode == "الباب":
     elif "أصفر" in status:
         st.warning("## 🟡 ضغط مرتفع - يرجى الانتظار")
     else:
-        st.error("## 🔴 العيادة متوقفة مؤقتاً لعلاج حالة حادّة")
+        st.error("## 🔴 العيادة متوقفة مؤقتاً")
         
     m1, m2 = st.columns(2)
     m1.metric(label="عدد الحالات المنتظرة", value=f"{clinic['queue']} مرضى")
     m2.metric(label="زمن الانتظار المتوقع", value=f"{clinic['queue'] * clinic['avg_time']} دقيقة")
 
-# 7. الشاشة الرابعة: التحليلات والتنبؤ الذكي
+# 8. الشاشة الرابعة: التحليلات
 elif mode == "التحليلات":
-    st.subheader("📊 لوحة التحليلات والتنبؤ الذكي باقتظاط العيادات")
+    st.session_state.clinics = load_clinics()
+    st.subheader("📊 لوحة التحليلات والتنبؤ الذكي")
     
     total_waiting = sum(d["queue"] for d in st.session_state.clinics.values())
     if total_waiting > 10:
-        st.warning(f"⚠️ **تنبؤ الذكاء الاصطناعي:** يُتوقع ذروة ازدحام خلال 45 دقيقة القادمة ({total_waiting} حالة منتظرة). يُوصى بفتح عيادات إضافية.")
+        st.warning(f"⚠️ **تنبؤ الذكاء الاصطناعي:** يُتوقع ذروة ازدحام ({total_waiting} حالة منتظرة).")
     else:
-        st.info("ℹ️ **حالة التدفق:** معدل الانتظار ضمن النطاق الطبيعي والأداء استباقي.")
+        st.info("ℹ️ **حالة التدفق:** معدل الانتظار ضمن النطاق الطبيعي.")
 
     chart_data = pd.DataFrame([
         {"العيادة": d["name"], "المرضى": d["queue"], "الحالات الحرجة": d["critical_count"]}
@@ -322,6 +350,4 @@ elif mode == "التحليلات":
     ]).set_index("العيادة")
     
     st.bar_chart(chart_data)
-    
-    st.write("### 📜 السجل اللحظي لتوجيه المرضى اليوم:")
     st.table(pd.DataFrame(st.session_state.patients_history))
