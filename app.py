@@ -220,7 +220,12 @@ if mode == "الرئيسية":
                 "id": patient_name, "triage": triage_level, "clinic": clinic_name, "wait": wait_time
             })
             
-            base_url = "https://patient-routing.streamlit.app/"
+            # جلب رابط التطبيق الحقيقي ديناميكياً لتجنب خطأ Access Denied
+            try:
+                base_url = f"https://{st.context.headers.get('host', 'localhost:8501')}/"
+            except Exception:
+                base_url = "https://t-routing.streamlit.app/" # ضع رابطك كخيار احتياطي
+
             ticket_url = f"{base_url}?ticket_patient={patient_name}&clinic={clinic_name}&triage={triage_level}"
             
             qr = qrcode.make(ticket_url)
@@ -307,13 +312,11 @@ elif mode == "الطبيب":
             st.session_state.clinics[selected_ip]["queue"] -= 1
             if clinic["critical_count"] > 0:
                 st.session_state.clinics[selected_ip]["critical_count"] -= 1
-            # حفظ النقصان فوراً ليتحدث الجوال
             save_clinics(st.session_state.clinics)
             st.rerun()
 
 # 7. الشاشة الثالثة: شاشة الانتظار (شاشة الباب)
 elif mode == "الباب":
-    # إعادة تحميل البيانات لضمان المزامنة
     st.session_state.clinics = load_clinics()
     
     selected_ip = st.selectbox("اختر العيادة للمعاينة:", list(st.session_state.clinics.keys()))
