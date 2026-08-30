@@ -1,0 +1,38 @@
+{
+    "192.168.1.101": {
+        "name": "عيادة العظام 1",
+        "specialty": "عظام",
+        "status": "🟢 أخضر",
+        "queue": 2,
+        "avg_time": 10,
+        "critical_count": 0,
+        "camera_count": 0
+    },
+    "192.168.1.102": {
+        "name": "عيادة العظام 2",
+        "specialty": "عظام",
+        "status": "🟡 أصفر",
+        "queue": 5,
+        "avg_time": 10,
+        "critical_count": 1,
+        "camera_count": 0
+    },
+    "192.168.1.103": {
+        "name": "عيادة الباطنية 1",
+        "specialty": "باطنية",
+        "status": "🟢 أخضر",
+        "queue": 1,
+        "avg_time": 8,
+        "critical_count": 0,
+        "camera_count": 0
+    },
+    "192.168.1.104": {
+        "name": "عيادة الباطنية 2",
+        "specialty": "باطنية",
+        "status": "🔴 أحمر",
+        "queue": 8,
+        "avg_time": 8,
+        "critical_count": 2,
+        "camera_count": 0
+    }
+}
