@@ -5,9 +5,9 @@ import time
 from ultralytics import YOLO
 
 DATA_FILE = "clinics_data.json"
-TARGET_CLINIC_IP = "192.168.1.101" # العيادة المستهدفة للكاميرا
+TARGET_CLINIC_IP = "192.168.1.101"  # العيادة المربوطة بهذه الكاميرا
 
-# تحميل نموذج YOLOv8
+# تحميل النموذج التلقائي المباشر من GitHub/Ultralytics
 model = YOLO('yolov8n.pt')
 
 def update_camera_data(clinic_ip, count):
@@ -21,7 +21,7 @@ def update_camera_data(clinic_ip, count):
         if clinic_ip in data:
             data[clinic_ip]["camera_count"] = count
             
-            # تحديث الحالة تلقائياً بناءً على قراءة الكاميرا
+            # تقييم الازدحام تلقائياً
             if count >= 8:
                 data[clinic_ip]["status"] = "🔴 أحمر"
             elif count >= 4:
@@ -33,10 +33,10 @@ def update_camera_data(clinic_ip, count):
             json.dump(data, f, ensure_ascii=False, indent=4)
             
     except Exception as e:
-        print(f"خطأ أثناء تحديث الملف: {e}")
+        print(f"خطأ أثناء تحديث البيانات: {e}")
 
 cap = cv2.VideoCapture(0)
-print("🎥 تم تشغيل نظام الرؤية الحاسوبية لمعاينة الازدحام...")
+print("🎥 تم تشغيل نظام الرؤية الحاسوبية ومعالجة الازدحام...")
 
 last_update = time.time()
 
@@ -45,18 +45,19 @@ while cap.isOpened():
     if not ret:
         break
 
-    # الكشف عن الأشخاص فقط (Class 0 = Person)
+    # تصفية الكشف على الأشخاص فقط (Class 0 = Person)
     results = model(frame, classes=[0], verbose=False)
     people_count = len(results[0].boxes)
 
-    # تحديث كل ثانية
+    # تحديث بيانات القرص/الملف كل ثانية
     if time.time() - last_update > 1.0:
         update_camera_data(TARGET_CLINIC_IP, people_count)
         last_update = time.time()
 
+    # رسم إطارات الكشف والعداد
     annotated_frame = results[0].plot()
-    cv2.putText(annotated_frame, f"People Count: {people_count}", (20, 40),
-                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+    cv2.putText(annotated_frame, f"People Count: {people_count}", (20, 50),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
 
     cv2.imshow("Smart Patient Routing - Live CV Density Detection", annotated_frame)
 
