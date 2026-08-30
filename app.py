@@ -88,6 +88,16 @@ st.markdown('''
             text-align: center !important;
             margin: 8px 0;
         }
+        .completed-card {
+            border: 2px solid #4CAF50;
+            border-radius: 12px;
+            padding: 25px;
+            background-color: #1b382b;
+            color: #ffffff !important;
+            text-align: center;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            margin-bottom: 20px;
+        }
     </style>
 ''', unsafe_allow_html=True)
 
@@ -116,14 +126,32 @@ if "ticket_patient" in query_params:
     p_clinic_name = query_params.get("clinic", "غير محدد")
     p_triage = query_params.get("triage", "عادي")
     
-    # قراءة أحدث بيانات مباشرة من الملف المشترك
+    # قراءة أحدث بيانات من الملف المشترك
     latest_clinics = load_clinics()
     
-    current_wait = 0
+    target_clinic = None
     for ip, d in latest_clinics.items():
         if d["name"] == p_clinic_name:
-            current_wait = d["queue"] * d["avg_time"]
+            target_clinic = d
             break
+
+    # 💡 التحقق الذكي: إذا أصبحت الحالات في الطابور 0، فهذا يعني إتمام المعاينة وإغلاق التذكرة
+    if target_clinic and target_clinic["queue"] == 0:
+        st.markdown("<h2 style='text-align: center;'>✅ تم إنهاء المعاينة بنجاح</h2>", unsafe_allow_html=True)
+        st.markdown(f'''
+            <div class="completed-card">
+                <h3>👤 المريض: {p_name}</h3>
+                <p>🏥 <strong>{p_clinic_name}</strong></p>
+                <hr style="border-color: #4CAF50;">
+                <h4>🎉 نتمنى لك دوام الصحة والعافية!</h4>
+                <p>تم استكمال الكشف واستخدام هذه التذكرة الرقمية بنجاح.</p>
+            </div>
+        ''', unsafe_allow_html=True)
+        st.info("🎟️ ملاحظة: تمت أرشفة هذه التذكرة ولن تظهر في قائمة الانتظار النشطة.")
+        st.stop()
+
+    # في حال لا زالت الحالة قيد الانتظار (queue > 0)
+    current_wait = target_clinic["queue"] * target_clinic["avg_time"] if target_clinic else 0
 
     st.markdown("<h2 style='text-align: center;'>🎫 بطاقة تذكرة المريض الرقمية</h2>", unsafe_allow_html=True)
     
@@ -213,18 +241,17 @@ if mode == "الرئيسية":
             else:
                 st.success(f"💡 **التوصية الذكية:** تحويل المريض إلى **{clinic_name}** | ⏱️ الانتظار المتوقع: **{wait_time} دقيقة**")
             
-            # حفظ التحديث الموحد
             save_clinics(st.session_state.clinics)
             
             st.session_state.patients_history.append({
                 "id": patient_name, "triage": triage_level, "clinic": clinic_name, "wait": wait_time
             })
             
-            # جلب رابط التطبيق الحقيقي ديناميكياً لتجنب خطأ Access Denied
+            # جلب رابط التطبيق الحقيقي ديناميكياً
             try:
                 base_url = f"https://{st.context.headers.get('host', 'localhost:8501')}/"
             except Exception:
-                base_url = "https://t-routing.streamlit.app/" # ضع رابطك كخيار احتياطي
+                base_url = "https://t-routing.streamlit.app/" # ضع رابط تطبيقك المعتمد
 
             ticket_url = f"{base_url}?ticket_patient={patient_name}&clinic={clinic_name}&triage={triage_level}"
             
@@ -312,6 +339,7 @@ elif mode == "الطبيب":
             st.session_state.clinics[selected_ip]["queue"] -= 1
             if clinic["critical_count"] > 0:
                 st.session_state.clinics[selected_ip]["critical_count"] -= 1
+            
             save_clinics(st.session_state.clinics)
             st.rerun()
 
